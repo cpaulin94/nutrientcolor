@@ -71,9 +71,10 @@ a mano: **vanno comunque controllati prima di salvare.**
   Il service worker lo mette in cache, quindi dalla seconda volta funziona offline.
 - I valori salvati restano nel `localStorage` del telefono. Disinstallare l'app
   o cancellare i dati del sito li elimina.
-- Per aggiornare l'app dopo una modifica, cambia `CACHE = "macrocolore-v2"`
-  in `sw.js` (per esempio `-v3`), altrimenti il browser continua a servire
-  la versione vecchia dalla cache.
+- Dopo una modifica il telefono prende la versione nuova alla seconda
+  apertura: il service worker serve la copia in cache e intanto scarica
+  quella aggiornata. Per farla arrivare subito, cambia
+  `CACHE = "macrocolore-v3"` in `sw.js` (per esempio `-v4`).
 - Foto da vicino e ben illuminate: sotto i ~30 px di altezza del carattere
   l'OCR attacca l'unità alla cifra e legge `8,5 g` come `859`.
 

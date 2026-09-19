@@ -1,4 +1,4 @@
-var CACHE = "macrocolore-v2";
+var CACHE = "macrocolore-v3";
 var SHELL = [
   "./",
   "./index.html",
@@ -36,19 +36,41 @@ self.addEventListener("fetch", function (e) {
   if (req.method !== "GET") return;
 
   var url = new URL(req.url);
-  var esterno = url.origin !== location.origin;
+  var nostro = url.origin === location.origin;
 
+  // I file dell'app si servono dalla cache, ma intanto si va a vedere se ne
+  // esiste una versione nuova e si aggiorna la copia per la volta dopo.
+  // Con la sola cache, modificare un file senza cambiare CACHE lasciava il
+  // telefono sulla versione vecchia per sempre: è già successo.
+  if (nostro) {
+    e.respondWith(
+      caches.open(CACHE).then(function (c) {
+        return c.match(req).then(function (hit) {
+          var rete = fetch(req).then(function (res) {
+            if (res && res.ok) c.put(req, res.clone());
+            return res;
+          }).catch(function () {
+            return hit || (req.mode === "navigate" ? c.match("./index.html") : null) ||
+                   new Response("", { status: 504 });
+          });
+          return hit || rete;
+        });
+      })
+    );
+    return;
+  }
+
+  // Il modello dell'OCR è grosso e non cambia mai: cache e basta.
   e.respondWith(
     caches.match(req).then(function (hit) {
       if (hit) return hit;
       return fetch(req).then(function (res) {
-        var copia = res.clone();
-        if (res.ok && (esterno || url.origin === location.origin)) {
+        if (res && res.ok) {
+          var copia = res.clone();
           caches.open(CACHE).then(function (c) { c.put(req, copia); });
         }
         return res;
       }).catch(function () {
-        if (req.mode === "navigate") return caches.match("./index.html");
         return new Response("", { status: 504 });
       });
     })
