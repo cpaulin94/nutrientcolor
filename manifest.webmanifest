@@ -1,0 +1,16 @@
+{
+  "name": "Macrocolore",
+  "short_name": "Macrocolore",
+  "description": "Legge una tabella nutrizionale e la traduce in colore, glifo e barra calorica.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1a18",
+  "theme_color": "#1a1a18",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
