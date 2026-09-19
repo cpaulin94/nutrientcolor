@@ -1,7 +1,8 @@
-var CACHE = "macrocolore-v1";
+var CACHE = "macrocolore-v2";
 var SHELL = [
   "./",
   "./index.html",
+  "./ocr.js",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",

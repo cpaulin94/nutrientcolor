@@ -53,7 +53,9 @@ border:0.5px solid var(--bd2);background:transparent;color:var(--tx)}
 .kv{font-size:12px;color:var(--tx2);width:62px;text-align:right;font-variant-numeric:tabular-nums}
 .hist{padding:10px 0;border-top:0.5px solid var(--bd)}
 .st{font-size:13px;color:var(--tx2);margin:10px 0 0;min-height:18px}
-canvas{display:none}
+.st.warn{color:#b4540a}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .st.warn{color:#e8a25e}}
+:root[data-theme="dark"] .st.warn{color:#e8a25e}
 .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;
 background:var(--accbg);color:var(--acc);margin-left:6px}
 </style>
@@ -101,9 +103,8 @@ background:var(--accbg);color:var(--acc);margin-left:6px}
   <div id="hist"></div>
 </div>
 
-<canvas id="cv"></canvas>
-
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+<script src="./ocr.js"></script>
 <script>
 var AX=[-90,150,30],D=Math.PI/180,R=24;
 
@@ -191,60 +192,39 @@ document.getElementById("save").onclick=function(){
 
 document.getElementById("shot").onclick=function(){ document.getElementById("file").click() };
 
-function estrai(testo){
-  var t=testo.toLowerCase().replace(/,/g,".");
-  function trova(chiavi){
-    for(var i=0;i<chiavi.length;i++){
-      var re=new RegExp(chiavi[i]+"[^0-9\\n]{0,40}?([0-9]+(?:\\.[0-9]+)?)","i");
-      var m=t.match(re);
-      if(m) return parseFloat(m[1]);
-    }
-    return null;
-  }
-  return {
-    P:trova(["protein[ei]","eiwit","protein"]),
-    C:trova(["carboidrat[ie]","di cui zuccheri|carbohydrate","koolhydraten"]),
-    G:trova(["grassi","fett","fat","lipidi"])
-  };
-}
+var st=document.getElementById("status");
+function stato(t,avviso){ st.textContent=t; st.className=avviso?"st warn":"st" }
 
 document.getElementById("file").onchange=function(e){
   var f=e.target.files && e.target.files[0];
+  e.target.value="";                      // per poter riscattare la stessa foto
   if(!f) return;
-  var st=document.getElementById("status");
-  if(typeof Tesseract==="undefined"){ st.textContent="Motore OCR non disponibile. Inserisci i valori a mano."; return }
-  st.textContent="Lettura in corso, la prima volta scarica il modello…";
-  var img=new Image();
-  img.onload=function(){
-    var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
-    var sc=Math.min(1400/img.width,1);
-    cv.width=img.width*sc; cv.height=img.height*sc;
-    ctx.drawImage(img,0,0,cv.width,cv.height);
-    var d=ctx.getImageData(0,0,cv.width,cv.height);
-    for(var i=0;i<d.data.length;i+=4){
-      var v=0.299*d.data[i]+0.587*d.data[i+1]+0.114*d.data[i+2];
-      v=v<128?Math.max(0,v*0.7):Math.min(255,v*1.25);
-      d.data[i]=d.data[i+1]=d.data[i+2]=v;
+  if(typeof Tesseract==="undefined"||typeof NC==="undefined"){
+    stato("Motore di lettura non disponibile. Inserisci i valori a mano."); return;
+  }
+  stato("Preparo l'immagine…");
+  NC.leggiFoto(f,function(m){
+    var pc=Math.round((m.progress||0)*100);
+    if(m.status&&m.status.indexOf("loading")===0) stato("Scarico il modello… "+pc+"%");
+    else if(m.status==="recognizing text") stato("Leggo la tabella… "+pc+"%");
+  }).then(function(r){
+    var campi={P:"p",C:"c",G:"g"}, nomi={P:"proteine",C:"carboidrati",G:"grassi"}, letti=[];
+    ["P","C","G"].forEach(function(k){
+      if(r[k]!==null){ document.getElementById(campi[k]).value=r[k]; letti.push(nomi[k]) }
+    });
+    if(!letti.length){
+      stato("Non ho trovato i valori nella foto. Inseriscili a mano.",true); return;
     }
-    ctx.putImageData(d,0,0);
-    Tesseract.recognize(cv,"ita+eng")
-      .then(function(res){
-        var v=estrai(res.data.text||"");
-        var trovati=[];
-        if(v.P!==null){document.getElementById("p").value=v.P;trovati.push("proteine")}
-        if(v.C!==null){document.getElementById("c").value=v.C;trovati.push("carboidrati")}
-        if(v.G!==null){document.getElementById("g").value=v.G;trovati.push("grassi")}
-        if(trovati.length){
-          st.textContent="Letti: "+trovati.join(", ")+". Controlla i numeri.";
-          var q=leggi(); mostra(q.P,q.C,q.G,q.nome);
-        } else {
-          st.textContent="Non ho trovato i valori. Inseriscili a mano.";
-        }
-      })
-      .catch(function(){ st.textContent="OCR fallito. Inserisci i valori a mano." });
-  };
-  img.onerror=function(){ st.textContent="Immagine non leggibile." };
-  img.src=URL.createObjectURL(f);
+    var q=leggi(); mostra(q.P,q.C,q.G,q.nome);
+    var m=[letti.length===3?"Letti tutti e tre i valori."
+                           :"Letti solo: "+letti.join(", ")+"."];
+    if(r.kcal) m.push("L'etichetta dichiara "+r.kcal+" kcal.");
+    r.avvisi.forEach(function(a){ m.push("Attenzione: "+a+".") });
+    m.push("Controlla i numeri prima di salvare.");
+    stato(m.join(" "), r.avvisi.length>0 || letti.length<3);
+  }).catch(function(){
+    stato("Lettura fallita. Inserisci i valori a mano.",true);
+  });
 };
 </script>
 <script>

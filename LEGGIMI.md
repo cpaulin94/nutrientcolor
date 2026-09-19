@@ -1,4 +1,7 @@
-# Macrocolore — come metterlo online e installarlo
+# Macrocolore
+
+L'app è online su **https://cpaulin94.github.io/nutrientcolor/** e da lì si installa
+sul telefono. Le istruzioni sotto servono se vuoi pubblicarne un'altra copia.
 
 Non serve comprare un dominio. Le opzioni sotto danno un indirizzo HTTPS gratuito,
 che è il requisito che mancava per l'installazione.
@@ -14,10 +17,10 @@ che è il requisito che mancava per l'installazione.
 
 ## Opzione 2 — GitHub Pages (funziona anche da telefono)
 
-1. Crea un repository pubblico nuovo, per esempio `macrocolore`.
-2. Carica i sei file nella radice del repository (Add file → Upload files).
+1. Crea un repository pubblico nuovo, per esempio `nutrientcolor`.
+2. Carica i sette file nella radice del repository (Add file → Upload files).
 3. Settings → Pages → Source: `Deploy from a branch`, branch `main`, cartella `/ (root)`.
-4. Dopo un paio di minuti il sito è su `https://<tuonome>.github.io/macrocolore/`.
+4. Dopo un paio di minuti il sito è su `https://<tuonome>.github.io/nutrientcolor/`.
 
 ## Opzione 3 — Cloudflare Pages
 
@@ -32,21 +35,48 @@ Stesso principio: crea un progetto, carica la cartella, ottieni un `.pages.dev`.
 Se la voce "Installa app" non compare subito, ricarica la pagina una volta:
 Chrome deve prima registrare il service worker.
 
+## Come legge l'etichetta
+
+Le tabelle nutrizionali hanno forme molto diverse: una colonna sola per 100 g,
+due o tre colonne (100 g, porzione, % AR), tabelle orizzontali con i nomi in
+testa e i numeri sotto, il formato lineare tutto in un paragrafo. Anche l'ordine
+cambia: parecchie confezioni mettono le proteine prima dei carboidrati.
+
+Per questo `ocr.js` non cerca i numeri nel testo piatto, ma lavora sulle
+coordinate delle parole:
+
+- ricostruisce le righe visive e le divide in celle, così `di cui acidi grassi
+  saturi` non viene scambiato per la riga dei grassi;
+- riconosce la colonna "per 100 g" dall'intestazione e scarta le colonne di
+  percentuali;
+- scarta i numeri con unità sbagliata: un valore in `kcal` o in `mg` non può
+  essere un macronutriente;
+- **verifica il risultato contro le calorie dichiarate.** Se dai valori letti
+  escono calorie molto diverse da quelle in etichetta, la lettura viene
+  scartata e ne prova un'altra. È questo che impedisce di prendere le kcal
+  totali come grammi di proteine.
+
+Quando la lettura non torna, l'app lo dice invece di far finta di niente.
+I valori restano sempre modificabili a mano.
+
 ## Note
 
 - Al primo utilizzo l'OCR scarica circa 15 MB di modello linguistico.
   Il service worker lo mette in cache, quindi dalla seconda volta funziona offline.
 - I valori salvati restano nel `localStorage` del telefono. Disinstallare l'app
   o cancellare i dati del sito li elimina.
-- Per aggiornare l'app dopo una modifica, cambia `CACHE = "macrocolore-v1"`
-  in `sw.js` (per esempio `-v2`), altrimenti il browser continua a servire
+- Per aggiornare l'app dopo una modifica, cambia `CACHE = "macrocolore-v2"`
+  in `sw.js` (per esempio `-v3`), altrimenti il browser continua a servire
   la versione vecchia dalla cache.
+- Foto da vicino e ben illuminate: sotto i ~30 px di altezza del carattere
+  l'OCR attacca l'unità alla cifra e legge `8,5 g` come `859`.
 
 ## File
 
 | File | A cosa serve |
 |---|---|
-| `index.html` | L'app: fotocamera, OCR, calcolo, colore, glifo, barra, lista |
+| `index.html` | L'app: fotocamera, calcolo, colore, glifo, barra, lista |
+| `ocr.js` | Lettura della tabella nutrizionale dalla foto |
 | `manifest.webmanifest` | Nome, icone, colori e modalità a schermo intero |
 | `sw.js` | Cache offline dell'app e del motore OCR |
 | `icon-192.png`, `icon-512.png` | Icone dell'app |
