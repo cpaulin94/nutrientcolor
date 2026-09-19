@@ -51,13 +51,19 @@ coordinate delle parole:
   percentuali;
 - scarta i numeri con unità sbagliata: un valore in `kcal` o in `mg` non può
   essere un macronutriente;
+- pretende che i tre valori stiano nella stessa colonna, quando le colonne
+  sono più d'una: prendere un numero dalla colonna della porzione vuol dire
+  cambiare base di riferimento senza accorgersene;
 - **verifica il risultato contro le calorie dichiarate.** Se dai valori letti
   escono calorie molto diverse da quelle in etichetta, la lettura viene
   scartata e ne prova un'altra. È questo che impedisce di prendere le kcal
-  totali come grammi di proteine.
+  totali come grammi di proteine;
+- rilegge la foto più in grande se la prima lettura non convince, scegliendo
+  l'ingrandimento in base all'altezza del carattere misurata nella prima.
 
-Quando la lettura non torna, l'app lo dice invece di far finta di niente.
-I valori restano sempre modificabili a mano.
+Quando nessuna lettura sta in piedi, l'app lascia il campo vuoto e lo dice,
+invece di scrivere un numero sbagliato. I valori restano sempre modificabili
+a mano: **vanno comunque controllati prima di salvare.**
 
 ## Note
 

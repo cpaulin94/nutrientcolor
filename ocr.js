@@ -316,7 +316,7 @@ var NC = (function () {
         var o = out[i];
         var sy = Math.min(o.y1, r.y1) - Math.max(o.y0, r.y0);
         var sx = Math.min(o.x1, r.x1) - Math.max(o.x0, r.x0);
-        if (sy > Math.min(o.y1 - o.y0, r.y1 - r.y0) * 0.5 && sx < 0) {
+        if (sy > Math.min(o.y1 - o.y0, r.y1 - r.y0) * 0.7 && sx < 0) {
           o.p = o.p.concat(r.p);
           o.y0 = Math.min(o.y0, r.y0); o.y1 = Math.max(o.y1, r.y1);
           o.x0 = Math.min(o.x0, r.x0); o.x1 = Math.max(o.x1, r.x1);
@@ -363,32 +363,61 @@ var NC = (function () {
   // "22,6 g" -> "22649") e perde la virgola ("10,0 g" -> "100g"). Invece di
   // indovinare, produciamo tutte le letture plausibili e lasciamo che siano
   // la colonna e il conto delle calorie a scegliere.
-  function letture(t, tks, k) {
+  // Quando l'OCR perde le virgole le perde quasi tutte insieme, e lo si vede
+  // da due segni: numeri che cominciano per zero ("0,8 g" letto "08g"), che
+  // in etichetta non esistono, e più valori in grammi sopra i 100. Saperlo
+  // cambia tutto: se la perdita è sistematica, rimettere la virgola è
+  // un'ipotesi ragionevole; altrimenti è un azzardo che fa passare errori
+  // che si compensano fra loro.
+  function perditaVirgola(righe) {
+    var zeri = 0, grandi = 0;
+    righe.forEach(function (r) {
+      r.tks.forEach(function (t, k) {
+        var u = unitaDi(r.tks, k);
+        if (u === "kcal" || u === "kj" || u === "cal" || u === "mg" ||
+            u === "mcg" || u === "%" || t.indexOf("%") >= 0) return;
+        var nudo = t.replace(/[a-zµ]+$/, "").replace(/[.,]+$/, "");
+        if (!/^[0-9]+$/.test(nudo) || nudo === "100") return;
+        if (/^0[0-9]/.test(nudo)) zeri++;
+        if (parseFloat(nudo) > 100) grandi++;
+      });
+    });
+    return zeri >= 1 || grandi >= 2;
+  }
+
+  function letture(t, tks, k, perdita) {
     var u = unitaDi(tks, k), out = [];
-    var basi = [{ s: t, p: 0 }];
+    var attaccata = /[a-zµ]/.test(t);       // "85g", "04g": unità incollata
+    var basi = [{ s: t, p: 0, rotto: false }];
+    // "8,5 g" letto "8,59": la g diventa un 9 attaccato alla cifra. Se è
+    // successo, quel token è già compromesso e anche la virgola può mancare.
     if (!u && /9$/.test(t) && t.replace(/[^0-9]/g, "").length > 1) {
-      basi.push({ s: t.replace(/9$/, "").replace(/[.,]+$/, ""), p: 0.4 });
+      basi.push({ s: t.replace(/9$/, "").replace(/[.,]+$/, ""), p: 0.4, rotto: true });
     }
     basi.forEach(function (b) {
       var v = numero(b.s);
       if (v === null) return;
+      if (v >= 0 && v <= 100) {
+        var pen = b.p;
+        // Due decimali su un macronutriente non si vedono quasi mai.
+        if (v >= 1 && Math.abs(v * 10 - Math.round(v * 10)) > 1e-9) pen += 0.5;
+        out.push({ v: v, pen: pen });
+      }
       var sep = b.s.indexOf(",") >= 0 || b.s.indexOf(".") >= 0;
-      var divisori = sep ? [1] : [1, 10, 100];
-      divisori.forEach(function (d, i) {
-        var val = v / d;
-        if (val < 0 || val > 100) return;
-        if (i && val < 0.05) return;             // 0,004 g non è un macro
-        var pen = b.p + (i ? 1.2 + i * 0.6 : 0);
-        // Due decimali su un macronutriente non si vedono quasi mai in
-        // etichetta: di solito è la "g" letta come "9" ("8,5 g" -> "8,59").
-        if (val >= 1 && Math.abs(val * 10 - Math.round(val * 10)) > 1e-9) pen += 0.5;
-        out.push({ v: val, pen: pen });
-      });
+      if (sep) return;
+      var indizio = attaccata || b.rotto || v > 100 || perdita;
+      if (indizio && v / 10 >= 0.05 && v / 10 <= 100) {
+        out.push({ v: v / 10, pen: b.p + (perdita ? 0.5 : 1.6) });
+      }
+      // Due virgole perse nello stesso numero: molto più raro.
+      if ((v > 100 || perdita) && v / 100 >= 0.05 && v / 100 <= 100) {
+        out.push({ v: v / 100, pen: b.p + (perdita ? 1.4 : 2.6) });
+      }
     });
     return out;
   }
 
-  function candidatiRiga(r, i, salto) {
+  function candidatiRiga(r, i, salto, perdita) {
     var out = [], ord = 0;
     for (var k = i + salto; k < r.tks.length; k++) {
       var t = r.tks[k];
@@ -401,7 +430,7 @@ var NC = (function () {
       if (u === "mg" || u === "mcg") continue;   // sodio, vitamine
       if (numero(t) === null) continue;
       var x = (r.p[k].b.x0 + r.p[k].b.x1) / 2;
-      letture(t, r.tks, k).forEach(function (l) {
+      letture(t, r.tks, k, perdita).forEach(function (l) {
         out.push({ v: l.v, x: x, ord: ord, extra: l.pen });
       });
       ord++;
@@ -411,7 +440,7 @@ var NC = (function () {
   }
 
   // Tabelle orizzontali: nomi in testa, numeri nella riga sotto, incolonnati.
-  function candidatiSotto(righe, idx, r, i, salto) {
+  function candidatiSotto(righe, idx, r, i, salto, perdita) {
     var x0 = r.p[i].b.x0, x1 = r.p[i + salto - 1].b.x1;
     var largo = Math.max(x1 - x0, 20);
     var out = [];
@@ -425,7 +454,7 @@ var NC = (function () {
         if (s.tks[k].indexOf("%") >= 0) continue;
         var t = s.tks[k];
         if (numero(t) === null) continue;
-        var ls = letture(t, s.tks, k);
+        var ls = letture(t, s.tks, k, perdita);
         if (!ls.length) continue;
         ls.forEach(function (l) { out.push({ v: l.v, x: xc, ord: 0, extra: l.pen }); });
         break;
@@ -473,6 +502,8 @@ var NC = (function () {
   function estraiDaRighe(righe) {
     var col = colonne(righe);
     var cand = { P: [], C: [], G: [] };
+    var h = (righe[0] && righe[0].h) || 10;
+    var perdita = perditaVirgola(righe);
 
     righe.forEach(function (r, idx) {
       for (var i = 0; i < r.tks.length; i++) {
@@ -490,8 +521,8 @@ var NC = (function () {
               if (r.cella[b] === r.cella[i] && eSotto(r.tks[b])) sotto = true;
             }
             if (sotto) break;
-            var trovati = candidatiRiga(r, i, salto);
-            if (!trovati.length) trovati = candidatiSotto(righe, idx, r, i, salto);
+            var trovati = candidatiRiga(r, i, salto, perdita);
+            if (!trovati.length) trovati = candidatiSotto(righe, idx, r, i, salto, perdita);
             trovati.forEach(function (c) { cand[nut].push(c); });
             break;
           }
@@ -505,8 +536,10 @@ var NC = (function () {
       if (!cand.hasOwnProperty(nut)) continue;
       cand[nut] = cand[nut].map(function (c) {
         var pen = (c.ord || 0) * 0.5 + (c.extra || 0);
-        if (col.c100 !== null) pen += Math.abs(c.x - col.c100) / 200;
-        col.perc.forEach(function (px) { if (Math.abs(c.x - px) < 40) pen += 8; });
+        // Le distanze si misurano in altezze di carattere, non in pixel:
+        // altrimenti il peso della colonna cambia con la scala dell'immagine.
+        if (col.c100 !== null) pen += Math.abs(c.x - col.c100) / (h * 2.5);
+        col.perc.forEach(function (px) { if (Math.abs(c.x - px) < h) pen += 8; });
         c.pen = pen;
         return c;
       }).sort(function (a, b) { return a.pen - b.pen; });
@@ -519,7 +552,11 @@ var NC = (function () {
         return true;
       }).slice(0, 6);
     }
-    return { cand: cand, col: col, energia: energia(righe) };
+    var multi = false;
+    ["P", "C", "G"].forEach(function (k) {
+      cand[k].forEach(function (c) { if (c.ord > 0) multi = true; });
+    });
+    return { cand: cand, col: col, multi: multi, energia: energia(righe) };
   }
 
   /* ------------------------------------------------------------ selezione */
@@ -527,11 +564,16 @@ var NC = (function () {
   // Fra i candidati sceglie la terna più coerente con le calorie dichiarate.
   // È la difesa che impedisce di prendere le kcal totali come proteine:
   // 4·436 non torna mai con 436 kcal in etichetta.
-  function scegli(cand, kcal) {
+  // multi: la tabella ha davvero più colonne di valori. Solo in quel caso ha
+  // senso pretendere che i tre valori stiano incolonnati; nel formato lineare,
+  // in quello orizzontale e nelle etichette americane, dove il numero segue il
+  // nome sulla stessa riga, le x sono diverse per costruzione.
+  function scegli(cand, kcal, h, multi) {
     var liste = {};
-    ["P", "C", "G"].forEach(function (k) {
-      liste[k] = cand[k].length ? cand[k] : [null];
-    });
+    // "nessun valore" è sempre una possibilità: su una cella illeggibile è
+    // meglio non rispondere che prendere il numero della colonna accanto, che
+    // è riferito alla porzione e non a 100 g.
+    ["P", "C", "G"].forEach(function (k) { liste[k] = cand[k].concat([null]); });
     var best = null;
     liste.P.forEach(function (p) {
       liste.C.forEach(function (c) {
@@ -539,21 +581,26 @@ var NC = (function () {
           var P = p ? p.v : 0, C = c ? c.v : 0, G = g ? g.v : 0;
           var s = 0;
           [p, c, g].forEach(function (x) { if (x) s -= x.pen; else s -= 6; });
+          // I tre valori stanno in colonna: se uno viene da molto più a destra
+          // è di un'altra colonna, cioè di un'altra base di riferimento.
+          var xs = [p, c, g].filter(Boolean).map(function (x) { return x.x; });
+          if (multi && xs.length > 1) {
+            var largo = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+            s -= Math.max(0, largo - 2 * h) / (h * 0.8);
+          }
           var somma = P + C + G;
           if (somma > 105) s -= (somma - 105) * 2;
           var calc = 4 * P + 4 * C + 9 * G;
-          // Il confronto con le calorie vale solo se abbiamo tutti e tre i
-          // valori: con uno mancante il conto è per forza basso e spingerebbe
-          // a gonfiare gli altri due.
-          if (kcal && p && c && g) {
+          if (kcal) {
             var scarto = (calc - kcal) / Math.max(kcal, 50);
-            // Banda morta: gli arrotondamenti dell'etichetta valgono qualche
-            // punto percentuale e non devono decidere nulla. Fuori dalla banda
-            // pesa di più un calcolo troppo alto, perché un calcolo basso può
-            // dipendere da fibre e polioli, che qui non contiamo.
-            var fuori = scarto > 0.08 ? (scarto - 0.08) * 2.5
-                      : scarto < -0.15 ? (-scarto - 0.15) : 0;
-            s -= fuori * 30;
+            // Superare le calorie dichiarate è impossibile, e lo è anche per
+            // due valori su tre: questo vincolo vale sempre. La banda morta
+            // del 4% lascia passare gli arrotondamenti dell'etichetta.
+            if (scarto > 0.04) s -= (scarto - 0.04) * 2.5 * 30;
+            // Restare sotto invece è normale — fibre e polioli danno calorie
+            // che il 4/4/9 non conta — quindi si contesta solo se i tre valori
+            // ci sono tutti e il conto è comunque troppo basso.
+            if (p && c && g && scarto < -0.10) s -= (-scarto - 0.10) * 30;
           }
           if (best === null || s > best.s) {
             best = { s: s, P: p, C: c, G: g, calc: calc };
@@ -566,7 +613,7 @@ var NC = (function () {
 
   function componi(righe) {
     var e = estraiDaRighe(righe);
-    var b = scegli(e.cand, e.energia.kcal);
+    var b = scegli(e.cand, e.energia.kcal, (righe[0] && righe[0].h) || 10, e.multi);
     var val = {
       P: b.P ? b.P.v : null,
       C: b.C ? b.C.v : null,
@@ -578,10 +625,13 @@ var NC = (function () {
     };
     var letti = ["P", "C", "G"].filter(function (k) { return val[k] !== null; });
     val.letti = letti.length;
+    val.h = (righe[0] && righe[0].h) || 0;   // altezza tipica del carattere letto
+    val.accordo = null;                    // scarto relativo fra calcolo e etichetta
     if (val.kcal && letti.length === 3) {
       var calc = 4 * val.P + 4 * val.C + 9 * val.G;
       val.calc = calc;
-      if (calc > val.kcal * 1.25 + 30 || calc < val.kcal * 0.6 - 20) {
+      val.accordo = Math.abs(calc - val.kcal) / val.kcal;
+      if (Math.abs(calc - val.kcal) > Math.max(20, val.kcal * 0.12)) {
         val.avvisi.push("i valori letti darebbero " + Math.round(calc) +
                         " kcal, l'etichetta ne dichiara " + val.kcal);
       }
@@ -590,8 +640,13 @@ var NC = (function () {
         val.P + val.C + val.G > 105) {
       val.avvisi.push("la somma dei macronutrienti supera 100 g");
     }
+    // Il punteggio serve a confrontare due passaggi di lettura della stessa
+    // foto. Conta quanti valori ha trovato, ma soprattutto quanto il conto
+    // delle calorie torna: è l'unica misura di qualità che abbiamo senza
+    // sapere la risposta giusta.
     val.punteggio = letti.length * 10 + (val.avvisi.length ? 0 : 6) +
-                    (val.kcal ? 2 : 0);
+                    (val.kcal ? 2 : 0) +
+                    (val.accordo === null ? 0 : Math.max(0, 8 - val.accordo * 100));
     return val;
   }
 
@@ -631,10 +686,10 @@ var NC = (function () {
   function prepara(img, binarizza, extra) {
     var w = img.width || img.naturalWidth, h = img.height || img.naturalHeight;
     var L = Math.max(w, h), sc = 1;
-    if (L < 1800) sc = Math.min(3, 1800 / L);
-    else if (L > 2600) sc = 2600 / L;
+    if (L < 2000) sc = Math.min(3, 2000 / L);
+    else if (L > 2800) sc = 2800 / L;
     sc *= (extra || 1);
-    if (L * sc > 3600) sc = 3600 / L;
+    if (L * sc > 4200) sc = 4200 / L;
     var cv = document.createElement("canvas");
     cv.width = Math.max(1, Math.round(w * sc));
     cv.height = Math.max(1, Math.round(h * sc));
@@ -712,18 +767,38 @@ var NC = (function () {
     }).then(function (res) { return daDati(res.data); });
   }
 
-  // Due passaggi: il primo sull'immagine binarizzata, trattata come blocco
-  // unico (di solito il migliore sulle tabelle). Se non convince, il secondo
-  // ingrandisce ancora e lavora sulla scala di grigi: quasi tutte le letture
-  // sbagliate vengono da caratteri troppo piccoli, non dal layout.
+  // Una lettura si può fidare solo se ha trovato tutti e tre i valori e le
+  // calorie tornano: tre numeri plausibili ma sbagliati insieme sembrano una
+  // lettura riuscita, ed è così che passavano gli errori peggiori.
+  function convince(r) {
+    return r.letti === 3 && !r.avvisi.length &&
+           (r.accordo === null || r.accordo <= 0.05);
+  }
+
+  // Il primo passaggio è in scala di grigi: misurato sulle foto di prova, la
+  // soglia adattiva perde le virgole ("10,0 g" diventa "100g") e peggiora la
+  // lettura, quindi resta solo come ultima spiaggia.
+  //
+  // Se non convince, il secondo passaggio riscala in base all'altezza del
+  // carattere effettivamente misurata nel primo: è il parametro che conta di
+  // più, e conoscerla è meglio che indovinare una scala fissa.
   function leggiFoto(file, progresso) {
     riferisci = progresso || null;
     return caricaImmagine(file).then(function (img) {
       return motore().then(function (w) {
-        return passo(w, prepara(img, true), "6").then(function (a) {
-          if (a.letti === 3 && !a.avvisi.length) return a;
-          return passo(w, prepara(img, false, 1.5), "4").then(function (b) {
-            return b.punteggio > a.punteggio ? b : a;
+        return passo(w, prepara(img, false), "6").then(function (a) {
+          if (convince(a)) return a;
+          var mira = a.h > 4 ? 40 / a.h : 1.6;
+          var extra = Math.max(1.25, Math.min(2.4, mira));
+          return passo(w, prepara(img, false, extra), "6").then(function (b) {
+            var meglio = b.punteggio > a.punteggio ? b : a;
+            if (convince(meglio)) return meglio;
+            // Nessuna delle due convince: l'ultima carta è la binarizzazione,
+            // che su luce molto irregolare a volte recupera quello che la
+            // scala di grigi non vede.
+            return passo(w, prepara(img, true, extra), "6").then(function (c) {
+              return c.punteggio > meglio.punteggio ? c : meglio;
+            }, function () { return meglio; });
           }, function () { return a; });
         });
       });
